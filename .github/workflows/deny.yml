@@ -27,4 +27,4 @@ jobs:
         with:
           toolchain: ${{ inputs.rust-toolchain }}
       - uses: taiki-e/install-action@cargo-deny
-      - run: cargo deny check all ${{ inputs.deny-flags }}
+      - run: cargo deny ${{ inputs.deny-flags }} check all
