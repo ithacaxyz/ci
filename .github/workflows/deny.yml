@@ -2,7 +2,7 @@ name: deny
 
 on:
   workflow_call:
-    input:
+    inputs:
       rust-toolchain:
         description: "Rust toolchain; same syntax as dtolnay/rust-toolchain"
         default: "nightly"
