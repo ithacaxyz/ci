@@ -18,6 +18,10 @@ on:
         description: "GITHUB_TOKEN. See https://github.com/peter-evans/create-pull-request?tab=readme-ov-file#token"
         required: true
 
+permissions:
+  contents: write
+  pull-requests: write
+
 env:
   GITHUB_TOKEN: ${{ secrets.token }}
   BRANCH: cargo-update
