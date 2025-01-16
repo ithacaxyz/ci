@@ -19,6 +19,7 @@ on:
         required: true
 
 env:
+  GITHUB_TOKEN: ${{ secrets.token }}
   BRANCH: cargo-update
   BODY: |
     Automation to keep dependencies in `Cargo.lock` current.
@@ -63,7 +64,6 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.token }}
           add-paths: ./Cargo.lock
           commit-message: ${{ steps.msg.outputs.commit_message }}
           title: ${{ inputs.title }}
