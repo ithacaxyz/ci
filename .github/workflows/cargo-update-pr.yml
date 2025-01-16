@@ -1,0 +1,72 @@
+name: dependencies
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        description: "Rust toolchain; same syntax as dtolnay/rust-toolchain"
+        default: "nightly"
+        required: false
+        type: "string"
+      title:
+        description: "PR title"
+        default: "chore(deps): weekly `cargo update`"
+        required: false
+        type: "string"
+    secrets:
+      token:
+        description: "GITHUB_TOKEN. See https://github.com/peter-evans/create-pull-request?tab=readme-ov-file#token"
+        required: true
+
+env:
+  BRANCH: cargo-update
+  TITLE: ${{ inputs.title }}
+  BODY: |
+    Automation to keep dependencies in `Cargo.lock` current.
+
+    <details><summary><strong>cargo update log</strong></summary>
+    <p>
+
+    ```log
+    $cargo_update_log
+    ```
+
+    </p>
+    </details>
+
+jobs:
+  update:
+    name: Update
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust-toolchain }}
+
+      - name: cargo update
+        # Remove first line that always just says "Updating crates.io index"
+        run: cargo update --color never --verbose 2>&1 | sed '/crates.io index/d' | tee -a cargo_update.log
+
+      - name: Craft commit message and PR body
+        id: msg
+        run: |
+          export cargo_update_log="$(cat cargo_update.log)"
+
+          echo "commit_message<<EOF" >> $GITHUB_OUTPUT
+          printf "$TITLE\n\n$cargo_update_log\n" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$BODY" | envsubst >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.token }}
+          add-paths: ./Cargo.lock
+          commit-message: ${{ steps.msg.outputs.commit_message }}
+          title: ${{ inputs.TITLE }}
+          body: ${{ steps.msg.outputs.body }}
+          branch: ${{ env.BRANCH }}
