@@ -20,7 +20,6 @@ on:
 
 env:
   BRANCH: cargo-update
-  TITLE: ${{ inputs.title }}
   BODY: |
     Automation to keep dependencies in `Cargo.lock` current.
 
@@ -54,7 +53,7 @@ jobs:
           export cargo_update_log="$(cat cargo_update.log)"
 
           echo "commit_message<<EOF" >> $GITHUB_OUTPUT
-          printf "$TITLE\n\n$cargo_update_log\n" >> $GITHUB_OUTPUT
+          printf "${{ inputs.title }}\n\n$cargo_update_log\n" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
           echo "body<<EOF" >> $GITHUB_OUTPUT
@@ -67,6 +66,6 @@ jobs:
           token: ${{ secrets.token }}
           add-paths: ./Cargo.lock
           commit-message: ${{ steps.msg.outputs.commit_message }}
-          title: ${{ inputs.TITLE }}
+          title: ${{ inputs.title }}
           body: ${{ steps.msg.outputs.body }}
           branch: ${{ env.BRANCH }}
