@@ -11,33 +11,52 @@ defaults:
 
 jobs:
   auto-assign:
+    name: Auto Assign
+    # Permissions the called workflow requests (Caller workflow must still grant these scopes to GITHUB_TOKEN)
     permissions:
       issues: write
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - name: Auto assign PR to author
-        if: >
-          github.event.pull_request.user.type != 'Bot' &&
-          (
-            github.event.pull_request.author_association == 'MEMBER' ||
-            github.event.pull_request.author_association == 'OWNER'  ||
-            github.event.pull_request.author_association == 'COLLABORATOR'
-          )
+      - name: Auto assign PR to author (with permission checks)
         uses: actions/github-script@v7
         with:
           script: |
             const pr = context.payload.pull_request
-            const prAuthor = pr.user.login
 
-            console.log(`PR #${pr.number} author: ${prAuthor}`)
-            console.log(`Current assignees: ${pr.assignees.map(a => a.login).join(', ') || 'none'}`)
-
-            if (pr.assignees && pr.assignees.length > 0) {
-              console.log('PR already has assignees, skipping')
+            if (!pr) {
+              core.warning('No pull_request payload detected. Ensure this is triggered by a pull_request event or called from a workflow triggered by pull_request. Skipping.')
               return
             }
 
+            const prAuthor = pr.user?.login
+            const isBot = pr.user?.type === 'Bot'
+            const assoc = pr.author_association
+            const allowedAssocs = ['MEMBER', 'OWNER', 'COLLABORATOR']
+
+            core.info(`PR #${pr.number} author: ${prAuthor}`)
+            core.info(`Author association: ${assoc}`)
+            core.info(`Current assignees: ${pr.assignees?.map(a => a.login).join(', ') || 'none'}`)
+
+            // Skip for bots
+            if (isBot) {
+              core.info('Skipping: PR author is a Bot.')
+              return
+            }
+
+            // Skip for non-internal contributors (e.g., forks)
+            if (!allowedAssocs.includes(assoc)) {
+              core.info(`Skipping: author association (${assoc}) is not internal (MEMBER/OWNER/COLLABORATOR).`)
+              return
+            }
+
+            // Skip if assignees already present
+            if (Array.isArray(pr.assignees) && pr.assignees.length > 0) {
+              core.info('PR already has assignees, skipping.')
+              return
+            }
+
+            // Attempt to assign; provide descriptive errors on permission failure
             try {
               await github.rest.issues.addAssignees({
                 owner: context.repo.owner,
@@ -45,8 +64,34 @@ jobs:
                 issue_number: pr.number,
                 assignees: [prAuthor]
               })
-              console.log(`Successfully assigned PR #${pr.number} to ${prAuthor}`)
+              core.info(`Successfully assigned PR #${pr.number} to ${prAuthor}`)
             } catch (error) {
-              console.error(`Failed to assign PR: ${error.message}`)
+              if (error.status === 403 || error.status === 404) {
+                const lines = [
+                  `Failed to assign PR #${pr.number} to ${prAuthor} due to insufficient permissions for GITHUB_TOKEN.`,
+                  `Error: ${error.message}`,
+                ].join('\n')
+                core.setFailed(lines)
+                return
+              }
+
+              core.setFailed(`Failed to assign PR: ${error.message}`)
               throw error
+            }
+            
+            // Try to fetch repository default workflow permissions for helpful diagnostics
+            let defaultWorkflowPermissions = 'unknown'
+            try {
+              const { data } = await github.request('GET /repos/{owner}/{repo}/actions/permissions/workflow', {
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              })
+              defaultWorkflowPermissions = data.default_workflow_permissions
+              core.info(`Repository default workflow permissions: ${defaultWorkflowPermissions}`)
+              core.info(`Can approve pull request reviews: ${data.can_approve_pull_request_reviews}`)
+              if (defaultWorkflowPermissions !== 'write') {
+                core.warning('Default workflow permissions are not "write". If the caller workflow does not explicitly grant write permissions to GITHUB_TOKEN, assigning will fail.')
+              }
+            } catch (err) {
+              core.warning(`Could not read repository Actions workflow permissions (not fatal): ${err.message}`)
             }
