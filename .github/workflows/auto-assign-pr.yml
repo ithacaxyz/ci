@@ -1,0 +1,82 @@
+name: Auto Assign PR to Author
+
+on:
+  pull_request:
+    types: [opened, reopened]
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  auto-assign:
+    name: Auto Assign
+    # Permissions the called workflow requests (Caller workflow must still grant these scopes to GITHUB_TOKEN)
+    permissions:
+      issues: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto assign PR to author (with permission checks)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request
+
+            if (!pr) {
+              core.warning('No pull_request payload detected. Ensure this is triggered by a pull_request event or called from a workflow triggered by pull_request. Skipping.')
+              return
+            }
+
+            const prAuthor = pr.user?.login
+            const isBot = pr.user?.type === 'Bot'
+            const assoc = pr.author_association
+            const allowedAssocs = ['MEMBER', 'OWNER', 'COLLABORATOR']
+
+            core.info(`PR #${pr.number} author: ${prAuthor}`)
+            core.info(`Author association: ${assoc}`)
+            core.info(`Current assignees: ${pr.assignees?.map(a => a.login).join(', ') || 'none'}`)
+
+            // Skip for bots
+            if (isBot) {
+              core.info('Skipping: PR author is a Bot.')
+              return
+            }
+
+            // Skip for non-internal contributors (e.g., forks)
+            if (!allowedAssocs.includes(assoc)) {
+              core.info(`Skipping: author association (${assoc}) is not internal (MEMBER/OWNER/COLLABORATOR).`)
+              return
+            }
+
+            // Skip if assignees already present
+            if (Array.isArray(pr.assignees) && pr.assignees.length > 0) {
+              core.info('PR already has assignees, skipping.')
+              return
+            }
+
+            // Attempt to assign; provide descriptive errors on permission failure
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                assignees: [prAuthor]
+              })
+              core.info(`Successfully assigned PR #${pr.number} to ${prAuthor}`)
+            } catch (error) {
+              if (error.status === 403 || error.status === 404) {
+                const lines = [
+                  `Failed to assign PR #${pr.number} to ${prAuthor} due to insufficient permissions for GITHUB_TOKEN.`,
+                  `Error: ${error.message}`,
+                ].join('\n')
+                core.setFailed(lines)
+                return
+              }
+
+              core.setFailed(`Failed to assign PR: ${error.message}`)
+              core.warning('Possible reasons:')
+              console.info('- Default workflow permissions are not "write"')
+              console.info('- Caller workflow does not explicitly grant write permissions to GITHUB_TOKEN')
+            }
